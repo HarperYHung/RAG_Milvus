@@ -1,0 +1,751 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>RAG Pipeline</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.19.0/dist/tabler-icons.min.css">
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg:        #f5f0e8;
+    --bg-panel:  #ede8df;
+    --bg-card:   #faf8f4;
+    --bg-input:  #f0ece3;
+    --border:    rgba(0,0,0,0.10);
+    --border-focus: rgba(100,85,60,0.45);
+    --text:      #2c2620;
+    --text-muted:#6b6058;
+    --text-dim:  #a09488;
+    --accent:    #8b6f47;
+    --accent-bg: rgba(139,111,71,0.10);
+    --success:   #4a7c59;
+    --success-bg:rgba(74,124,89,0.10);
+    --error:     #a84c3a;
+    --error-bg:  rgba(168,76,58,0.10);
+    --teal:      #5b8a7a;
+    --radius: 10px; --radius-sm: 6px;
+  }
+
+  html, body { height: 100%; overflow: hidden; }
+  body {
+    font-family: 'IBM Plex Mono', 'JetBrains Mono', monospace;
+    background: var(--bg); color: var(--text);
+    display: grid;
+    grid-template-columns: 200px 1fr;
+    grid-template-rows: 48px 1fr;
+    height: 100vh;
+  }
+
+  .topbar {
+    grid-column: 1 / -1; background: var(--bg-panel);
+    border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; padding: 0 20px; gap: 12px;
+  }
+  .topbar-logo { font-size: 12px; font-weight: 700; letter-spacing: 0.1em; color: var(--accent); }
+  .topbar-logo span { color: var(--text-muted); font-weight: 400; }
+  .topbar-status { margin-left: auto; display: flex; align-items: center; gap: 8px; font-size: 11px; color: var(--text-dim); }
+  .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--text-dim); }
+  .dot.online { background: var(--success); box-shadow: 0 0 6px var(--success); }
+
+  .sidebar {
+    background: var(--bg-panel); border-right: 1px solid var(--border);
+    padding: 16px 12px; display: flex; flex-direction: column; gap: 2px; overflow-y: auto;
+  }
+  .sidebar-label { font-size: 9px; letter-spacing: 0.1em; color: var(--text-dim); text-transform: uppercase; padding: 0 8px; margin: 10px 0 3px; }
+  .nav-item {
+    display: flex; align-items: center; gap: 8px; padding: 7px 10px;
+    border-radius: var(--radius-sm); font-size: 12px; color: var(--text-muted);
+    cursor: pointer; border: none; background: none; width: 100%; text-align: left; transition: all 0.15s;
+  }
+  .nav-item:hover { background: var(--bg-card); color: var(--text); }
+  .nav-item.active { background: var(--accent-bg); color: var(--accent); }
+  .nav-item i { font-size: 15px; flex-shrink: 0; }
+
+  .main { overflow: hidden; display: flex; flex-direction: column; }
+
+  .page { display: none; }
+  .page.active { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+  .page.active:not(#page-chat) { overflow-y: auto; padding: 24px 28px; gap: 16px; }
+  #page-chat.active { overflow: hidden; }
+
+  .page-title { font-size: 13px; font-weight: 600; color: var(--text); display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+  .page-title i { color: var(--accent); font-size: 16px; }
+
+  .card { background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius); padding: 18px; }
+  .card-title { font-size: 10px; letter-spacing: 0.08em; color: var(--text-dim); text-transform: uppercase; margin-bottom: 14px; }
+
+  .drop-zone {
+    border: 1.5px dashed var(--border); border-radius: var(--radius);
+    padding: 36px 20px; text-align: center; cursor: pointer; transition: all 0.2s; position: relative;
+  }
+  .drop-zone:hover, .drop-zone.drag-over { border-color: var(--accent); background: var(--accent-bg); }
+  .drop-zone input[type=file] { position: absolute; inset: 0; opacity: 0; cursor: pointer; width: 100%; height: 100%; }
+  .drop-icon { font-size: 28px; color: var(--text-dim); margin-bottom: 10px; }
+  .drop-text { font-size: 12px; color: var(--text-muted); }
+  .drop-sub  { font-size: 10px; color: var(--text-dim); margin-top: 5px; }
+  .drop-zone.has-file .drop-icon { color: var(--success); }
+  .drop-zone.has-file { border-color: var(--success); background: var(--success-bg); }
+
+  .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .form-group { display: flex; flex-direction: column; gap: 5px; }
+  label { font-size: 10px; color: var(--text-muted); letter-spacing: 0.05em; text-transform: uppercase; }
+  input[type=text], input[type=number], select {
+    background: var(--bg-input); border: 1px solid var(--border);
+    border-radius: var(--radius-sm); color: var(--text);
+    padding: 7px 10px; font-size: 12px; font-family: inherit; outline: none; transition: border-color 0.15s; width: 100%;
+  }
+  input:focus, select:focus { border-color: var(--border-focus); }
+  select option { background: var(--bg-card); }
+
+  .strategy-toggle { display: flex; border: 1px solid var(--border); border-radius: var(--radius-sm); overflow: hidden; }
+  .strategy-btn {
+    flex: 1; padding: 7px; text-align: center; font-size: 12px;
+    cursor: pointer; color: var(--text-muted); border: none; background: none; font-family: inherit; transition: all 0.15s;
+  }
+  .strategy-btn.active { background: var(--accent-bg); color: var(--accent); }
+  .strategy-btn:first-child { border-right: 1px solid var(--border); }
+  .size-params { display: flex; flex-direction: column; gap: 10px; }
+  .size-params.hidden { display: none; }
+
+  .btn-ingest {
+    width: 100%; padding: 11px; background: var(--accent); color: #fff;
+    border: none; border-radius: var(--radius-sm); font-size: 12px; font-weight: 600;
+    font-family: inherit; cursor: pointer; transition: all 0.15s;
+    display: flex; align-items: center; justify-content: center; gap: 8px; text-transform: uppercase;
+  }
+  .btn-ingest:hover { filter: brightness(1.1); }
+  .btn-ingest:disabled { opacity: 0.5; cursor: not-allowed; }
+  .btn-ingest .spinner { width: 13px; height: 13px; border: 2px solid rgba(0,0,0,0.3); border-top-color: #0f1117; border-radius: 50%; animation: spin 0.7s linear infinite; display: none; }
+  .btn-ingest.loading .spinner { display: block; }
+  .btn-ingest.loading .btn-label { display: none; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  .btn-sm { padding: 6px 12px; background: none; border: 1px solid var(--border); border-radius: var(--radius-sm); color: var(--text-muted); font-size: 11px; font-family: inherit; cursor: pointer; transition: all 0.15s; }
+  .btn-sm:hover { border-color: var(--accent); color: var(--accent); }
+  .btn-sm.danger:hover { border-color: var(--error); color: var(--error); }
+
+  .result-panel { border-radius: var(--radius); padding: 14px 18px; font-size: 11px; display: none; flex-direction: column; gap: 8px; }
+  .result-panel.show { display: flex; }
+  .result-panel.success { background: var(--success-bg); border: 1px solid rgba(104,211,145,0.2); }
+  .result-panel.error   { background: var(--error-bg);   border: 1px solid rgba(252,129,129,0.2); }
+  .result-header { display: flex; align-items: center; gap: 8px; font-size: 12px; font-weight: 600; }
+  .result-header.success { color: var(--success); }
+  .result-header.error   { color: var(--error); }
+  .result-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px,1fr)); gap: 6px; }
+  .result-stat { background: rgba(255,255,255,0.04); border-radius: var(--radius-sm); padding: 8px 10px; }
+  .result-stat-label { font-size: 9px; color: var(--text-dim); letter-spacing: 0.06em; margin-bottom: 3px; text-transform: uppercase; }
+  .result-stat-value { font-size: 13px; color: var(--text); font-weight: 600; word-break: break-all; }
+  .log-panel { background: var(--bg-input); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 10px; font-size: 10px; color: var(--text-muted); max-height: 160px; overflow-y: auto; line-height: 1.8; display: none; white-space: pre-wrap; word-break: break-all; }
+  .log-panel.show { display: block; }
+  .log-line.info    { color: var(--accent); }
+  .log-line.success { color: var(--success); }
+  .log-line.error   { color: var(--error); }
+
+  .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px,1fr)); gap: 10px; }
+  .stat-card { background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius); padding: 14px 18px; }
+  .stat-card-label { font-size: 10px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 6px; }
+  .stat-card-value { font-size: 20px; font-weight: 600; color: var(--text); }
+  .empty-state { text-align: center; padding: 40px 20px; color: var(--text-dim); font-size: 12px; }
+  .empty-state i { font-size: 32px; display: block; margin-bottom: 10px; }
+
+  /* Chat */
+  .chat-topbar {
+    display: flex; align-items: center; gap: 12px;
+    padding: 0 20px; height: 48px;
+    border-bottom: 1px solid var(--border); background: var(--bg-panel);
+    flex-shrink: 0;
+  }
+  .chat-params { display: flex; align-items: center; margin-left: auto; border: 1px solid var(--border); border-radius: var(--radius-sm); overflow: hidden; }
+  .cparam { display: flex; align-items: center; gap: 6px; padding: 5px 10px; border-right: 1px solid var(--border); }
+  .cparam:last-child { border-right: none; }
+  .cparam-label { font-size: 9px; color: var(--text-dim); letter-spacing: 0.06em; text-transform: uppercase; white-space: nowrap; }
+  .cparam-input { width: 46px; background: transparent; border: none; color: var(--text); font-size: 12px; font-family: inherit; outline: none; text-align: right; }
+
+  .chat-body { display: grid; grid-template-columns: 1fr 260px; flex: 1; min-height: 0; overflow: hidden; }
+  .chat-main { display: flex; flex-direction: column; min-height: 0; border-right: 1px solid var(--border); }
+  .chat-messages { flex: 1; overflow-y: auto; padding: 20px; display: flex; flex-direction: column; gap: 14px; min-height: 0; }
+  .chat-empty { margin: auto; display: flex; flex-direction: column; align-items: center; gap: 10px; color: var(--text-dim); font-size: 12px; }
+  .chat-empty i { font-size: 30px; }
+
+  .chat-input-row { display: flex; align-items: flex-end; border-top: 1px solid var(--border); background: var(--bg-panel); flex-shrink: 0; }
+  .chat-input { flex: 1; background: transparent; border: none; color: var(--text); padding: 12px 14px; font-size: 13px; font-family: inherit; outline: none; resize: none; min-height: 44px; max-height: 120px; line-height: 1.5; }
+  .chat-send-btn { padding: 0 18px; height: 44px; background: var(--accent); color: #fff; border: none; border-left: 1px solid rgba(0,0,0,0.1); font-size: 16px; cursor: pointer; transition: all 0.15s; display: flex; align-items: center; flex-shrink: 0; }
+  .chat-send-btn:hover { filter: brightness(1.1); }
+  .chat-send-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+  .chat-clear-btn { padding: 0 12px; height: 44px; background: none; border: none; border-left: 1px solid var(--border); color: var(--text-dim); font-size: 14px; cursor: pointer; transition: all 0.15s; flex-shrink: 0; }
+  .chat-clear-btn:hover { color: var(--error); }
+
+  .msg { display: flex; flex-direction: column; gap: 5px; }
+  .msg-user { align-self: flex-end; max-width: 72%; background: var(--accent-bg); border: 1px solid rgba(99,179,237,0.2); border-radius: 14px 14px 2px 14px; padding: 9px 13px; font-size: 13px; line-height: 1.6; }
+  .msg-assistant { align-self: flex-start; max-width: 90%; display: flex; flex-direction: column; gap: 5px; }
+  .msg-bubble { background: var(--bg-card); border: 1px solid var(--border); border-radius: 2px 14px 14px 14px; padding: 11px 14px; font-size: 13px; line-height: 1.7; white-space: pre-wrap; word-break: break-word; }
+  .msg-bubble strong { color: var(--accent); }
+  .msg-citations { display: flex; flex-wrap: wrap; gap: 4px; }
+  .citation-tag { display: inline-flex; align-items: center; gap: 4px; background: var(--bg-input); border: 1px solid var(--border); border-radius: 20px; padding: 3px 9px 3px 5px; font-size: 10px; color: var(--text-muted); cursor: pointer; transition: all 0.15s; }
+  .citation-tag:hover { border-color: var(--teal); color: var(--teal); }
+  .citation-badge { background: var(--teal); color: #fff; border-radius: 50%; width: 14px; height: 14px; display: inline-flex; align-items: center; justify-content: center; font-size: 8px; font-weight: 700; }
+  .typing-dot { display: inline-block; width: 5px; height: 5px; border-radius: 50%; background: var(--text-dim); animation: blink 1.2s infinite; margin: 0 1px; }
+  .typing-dot:nth-child(2) { animation-delay: 0.2s; }
+  .typing-dot:nth-child(3) { animation-delay: 0.4s; }
+  @keyframes blink { 0%,80%,100%{opacity:0.2} 40%{opacity:1} }
+
+  .chat-sidebar { display: flex; flex-direction: column; overflow: hidden; background: var(--bg-panel); }
+  .citation-header { font-size: 10px; letter-spacing: 0.08em; color: var(--text-dim); text-transform: uppercase; padding: 12px 14px 8px; border-bottom: 1px solid var(--border); flex-shrink: 0; }
+  .citation-body { flex: 1; overflow-y: auto; padding: 12px 14px; font-size: 11px; color: var(--text-dim); line-height: 1.6; }
+  .score-bar { display: flex; align-items: center; gap: 6px; font-size: 10px; color: var(--text-dim); margin: 6px 0; }
+  .score-track { flex: 1; height: 3px; background: var(--border); border-radius: 2px; overflow: hidden; }
+  .score-fill { height: 100%; background: var(--teal); border-radius: 2px; transition: width 0.3s; }
+</style>
+</head>
+<body>
+<header class="topbar">
+  <span class="topbar-logo">RAG<span>/pipeline</span></span>
+  <div class="topbar-status">
+    <span class="dot" id="ollama-dot"></span><span id="ollama-status">Backend —</span>
+    &nbsp;·&nbsp;
+    <span class="dot" id="milvus-dot"></span><span id="milvus-status">Milvus —</span>
+  </div>
+</header>
+
+<aside class="sidebar">
+  <div class="sidebar-label">主選單</div>
+  <button class="nav-item active" data-page="ingest" onclick="switchPage('ingest',this)"><i class="ti ti-upload"></i> 文件匯入</button>
+  <button class="nav-item" data-page="stats"  onclick="switchPage('stats', this)"><i class="ti ti-database"></i> 資料庫狀態</button>
+  <button class="nav-item" data-page="delete" onclick="switchPage('delete',this)"><i class="ti ti-trash"></i> 刪除文件</button>
+  <button class="nav-item" data-page="chat"   onclick="switchPage('chat',  this)"><i class="ti ti-message-chatbot"></i> 知識庫問答</button>
+  <div class="sidebar-label">設定</div>
+  <button class="nav-item" data-page="config" onclick="switchPage('config',this)"><i class="ti ti-settings"></i> 連線設定</button>
+</aside>
+
+<main class="main">
+
+  <!-- Ingest -->
+  <div class="page active" id="page-ingest">
+    <div class="page-title"><i class="ti ti-upload"></i> 文件匯入</div>
+    <div class="card">
+      <div class="card-title">上傳檔案</div>
+      <div class="drop-zone" id="drop-zone">
+        <input type="file" id="file-input" accept=".pdf,.txt,.docx,.xlsx,.xls,.jpg,.jpeg,.png,.webp" onchange="onFileSelected(this)">
+        <div class="drop-icon"><i class="ti ti-file-upload"></i></div>
+        <div class="drop-text" id="drop-text">點擊或拖放檔案至此</div>
+        <div class="drop-sub">支援：PDF · TXT · DOCX · XLSX · 圖片（JPG/PNG/WEBP）</div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-title">切割設定</div>
+      <div style="display:flex;flex-direction:column;gap:12px;">
+        <div class="form-group">
+          <label>切割策略</label>
+          <div class="strategy-toggle">
+            <button class="strategy-btn active" id="btn-size"   onclick="setStrategy('size')">依字數切割</button>
+            <button class="strategy-btn"        id="btn-header" onclick="setStrategy('header')">依標題切割</button>
+          </div>
+        </div>
+        <div class="size-params form-row" id="size-params">
+          <div class="form-group"><label>每塊 Token 上限</label><input type="number" id="chunk-size" value="512" min="64" max="4096"></div>
+          <div class="form-group"><label>重疊 Token 數</label><input type="number" id="chunk-overlap" value="50" min="0" max="512"></div>
+        </div>
+        <div class="form-group"><label>文件版號（選填）</label><input type="text" id="doc-version" placeholder="空白則自動填入時間戳"></div>
+      </div>
+    </div>
+    <button class="btn-ingest" id="btn-ingest" onclick="startIngest()">
+      <div class="spinner"></div><span class="btn-label"><i class="ti ti-rocket"></i>&nbsp; 開始匯入</span>
+    </button>
+    <div class="result-panel" id="result-panel"><div class="result-header" id="result-header"></div><div class="result-grid" id="result-grid"></div></div>
+    <div class="log-panel" id="log-panel"></div>
+  </div>
+
+  <!-- Stats -->
+  <div class="page" id="page-stats">
+    <div class="page-title"><i class="ti ti-database"></i> 資料庫狀態</div>
+    <div class="stats-grid" id="stats-grid"><div class="empty-state" style="grid-column:1/-1"><i class="ti ti-refresh"></i><button class="btn-sm" onclick="loadStats()">重新整理</button></div></div>
+    <button class="btn-sm" onclick="loadStats()" style="align-self:flex-start"><i class="ti ti-refresh"></i>&nbsp; 重新整理</button>
+  </div>
+
+  <!-- Delete -->
+  <div class="page" id="page-delete">
+    <div class="page-title"><i class="ti ti-trash"></i> 刪除文件</div>
+    <div class="card">
+      <div class="card-title">依 Doc ID 刪除</div>
+      <div style="display:flex;flex-direction:column;gap:10px;">
+        <div class="form-group"><label>Doc ID（SHA-256 前 16 碼）</label><input type="text" id="del-doc-id" placeholder="例：a3f2c1d0e9b8a7f6"></div>
+        <div class="form-group"><label>版號（選填，空白刪除所有版本）</label><input type="text" id="del-version" placeholder="例：v1.0"></div>
+        <button class="btn-sm danger" onclick="deleteDoc()" style="align-self:flex-start;padding:7px 16px;"><i class="ti ti-trash"></i>&nbsp; 確認刪除</button>
+        <div class="result-panel" id="delete-result"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Chat -->
+  <div class="page" id="page-chat">
+    <div class="chat-topbar">
+      <div class="page-title"><i class="ti ti-message-chatbot"></i> 知識庫問答</div>
+      <div class="chat-params">
+        <div class="cparam"><span class="cparam-label">Top-K</span><input class="cparam-input" type="number" id="q-topk" value="3" min="1" max="5"></div>
+        <div class="cparam"><span class="cparam-label">Similarity ≥</span><input class="cparam-input" type="number" id="q-threshold" value="0.5" min="0.3" max="1" step="0.1"></div>
+        <div class="cparam"><span class="cparam-label">Temperature</span><input class="cparam-input" type="number" id="q-temp" value="0.3" min="0.3" max="2" step="0.1"></div>
+        <div class="cparam"><span class="cparam-label">Max Tokens</span><input class="cparam-input" type="number" id="q-maxtok" value="500" min="100" max="1000" step="100"></div>
+      </div>
+    </div>
+    <div class="chat-body">
+      <div class="chat-main">
+        <div class="chat-messages" id="chat-messages">
+          <div class="chat-empty"><i class="ti ti-message-dots"></i>開始提問，AI 將從知識庫中檢索並回答</div>
+        </div>
+        <div class="chat-input-row">
+          <textarea class="chat-input" id="chat-input" rows="1" placeholder="輸入問題…（Enter 送出，Shift+Enter 換行）" oninput="autoResize(this)" onkeydown="handleKey(event)"></textarea>
+          <button class="chat-clear-btn" onclick="clearChat()" title="清除"><i class="ti ti-trash"></i></button>
+          <button class="chat-send-btn" id="btn-send" onclick="sendQuery()"><i class="ti ti-send"></i></button>
+        </div>
+      </div>
+      <div class="chat-sidebar">
+        <div class="citation-header">📚 來源詳情</div>
+        <div class="citation-body" id="citation-panel">點擊引用標籤查看原文</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Config -->
+  <div class="page" id="page-config">
+    <div class="page-title"><i class="ti ti-settings"></i> 連線設定</div>
+    <div class="card">
+      <div class="card-title">API 端點</div>
+      <div class="form-row">
+        <div class="form-group"><label>Backend URL</label><input type="text" id="api-url" value="http://localhost:8000"></div>
+        <div class="form-group"><label>&nbsp;</label><button class="btn-sm" onclick="saveConfig()" style="height:34px;">儲存並測試</button></div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-title">系統提示詞</div>
+      <div class="form-group">
+        <label>套用於所有問答，空白使用預設提示詞</label>
+        <textarea id="config-prompt" style="background:var(--bg-input);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);padding:10px 12px;font-size:12px;font-family:inherit;outline:none;resize:vertical;min-height:130px;width:100%;line-height:1.6;margin-top:6px;" placeholder="你是一位專業知識庫助理，使用繁體中文回答…"></textarea>
+      </div>
+      <div style="display:flex;align-items:center;gap:10px;margin-top:8px;">
+        <button class="btn-sm" onclick="savePrompt()">儲存 Prompt</button>
+        <button class="btn-sm" onclick="resetPrompt()">還原預設</button>
+        <span id="prompt-saved" style="font-size:11px;color:var(--success);display:none;">✓ 已儲存</span>
+      </div>
+    </div>
+  </div>
+
+</main>
+
+<script>
+const API = { base: localStorage.getItem('api_base') || 'http://localhost:8000' };
+let strategy = 'size';
+
+function switchPage(id, el) {
+  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+  document.getElementById('page-' + id).classList.add('active');
+  el.classList.add('active');
+  if (id === 'stats') loadStats();
+}
+
+function setStrategy(s) {
+  strategy = s;
+  document.getElementById('btn-size').classList.toggle('active', s === 'size');
+  document.getElementById('btn-header').classList.toggle('active', s === 'header');
+  document.getElementById('size-params').classList.toggle('hidden', s === 'header');
+}
+
+function onFileSelected(input) {
+  const f = input.files[0];
+  const zone = document.getElementById('drop-zone');
+  const txt  = document.getElementById('drop-text');
+  if (f) {
+    zone.classList.add('has-file');
+    txt.textContent = f.name + '  (' + (f.size / 1024).toFixed(1) + ' KB)';
+  } else {
+    zone.classList.remove('has-file');
+    txt.textContent = '點擊或拖放檔案至此';
+  }
+}
+
+['dragenter','dragover'].forEach(evt =>
+  document.getElementById('drop-zone').addEventListener(evt, e => {
+    e.preventDefault();
+    document.getElementById('drop-zone').classList.add('drag-over');
+  })
+);
+['dragleave','drop'].forEach(evt =>
+  document.getElementById('drop-zone').addEventListener(evt, e => {
+    e.preventDefault();
+    document.getElementById('drop-zone').classList.remove('drag-over');
+    if (evt === 'drop' && e.dataTransfer.files.length) {
+      document.getElementById('file-input').files = e.dataTransfer.files;
+      onFileSelected(document.getElementById('file-input'));
+    }
+  })
+);
+
+function log(msg, type='info') {
+  const panel = document.getElementById('log-panel');
+  panel.classList.add('show');
+  const line = document.createElement('span');
+  line.className = 'log-line ' + type;
+  const ts = new Date().toLocaleTimeString();
+  line.textContent = `[${ts}] ${msg}\n`;
+  panel.appendChild(line);
+  panel.scrollTop = panel.scrollHeight;
+}
+
+async function startIngest() {
+  const fileInput = document.getElementById('file-input');
+  if (!fileInput.files.length) { alert('請先選擇檔案'); return; }
+
+  const btn = document.getElementById('btn-ingest');
+  btn.disabled = true; btn.classList.add('loading');
+
+  const resultPanel = document.getElementById('result-panel');
+  resultPanel.className = 'result-panel';
+  document.getElementById('log-panel').innerHTML = '';
+  document.getElementById('log-panel').classList.remove('show');
+
+  const fd = new FormData();
+  fd.append('file',           fileInput.files[0]);
+  fd.append('chunk_strategy', strategy);
+  fd.append('chunk_size',     document.getElementById('chunk-size').value);
+  fd.append('chunk_overlap',  document.getElementById('chunk-overlap').value);
+  fd.append('doc_version',    document.getElementById('doc-version').value.trim());
+
+  log('開始上傳：' + fileInput.files[0].name);
+  log('策略：' + strategy + (strategy === 'size'
+      ? `  size=${document.getElementById('chunk-size').value}  overlap=${document.getElementById('chunk-overlap').value}`
+      : ''));
+
+  try {
+    const res  = await fetch(API.base + '/api/v1/ingest', { method: 'POST', body: fd });
+    const data = await res.json();
+
+    if (data.status === 'done') {
+      log('✓ 完成  chunks=' + data.total_chunks, 'success');
+      showResult('success', data);
+    } else {
+      log('✗ 失敗：' + data.message, 'error');
+      showResult('error', data);
+    }
+  } catch(e) {
+    log('連線失敗：' + e.message, 'error');
+    showResult('error', { message: e.message, doc_id: '—', doc_version: '—', total_chunks: 0 });
+  }
+
+  btn.disabled = false; btn.classList.remove('loading');
+}
+
+function showResult(type, data) {
+  const panel  = document.getElementById('result-panel');
+  const header = document.getElementById('result-header');
+  const grid   = document.getElementById('result-grid');
+
+  panel.className = 'result-panel show ' + type;
+  header.className = 'result-header ' + type;
+
+  if (type === 'success') {
+    header.innerHTML = '<i class="ti ti-circle-check"></i> 匯入成功';
+    grid.innerHTML = [
+      stat('Doc ID',    data.doc_id),
+      stat('版號',      data.doc_version),
+      stat('Chunks',   data.total_chunks),
+      stat('狀態',      data.status),
+    ].join('');
+  } else {
+    header.innerHTML = '<i class="ti ti-circle-x"></i> 匯入失敗';
+    grid.innerHTML = stat('錯誤訊息', data.message || '未知錯誤');
+  }
+}
+
+function stat(label, value) {
+  return `<div class="result-stat">
+    <div class="result-stat-label">${label}</div>
+    <div class="result-stat-value">${value}</div>
+  </div>`;
+}
+
+async function loadStats() {
+  const grid = document.getElementById('stats-grid');
+  grid.innerHTML = '<div style="color:var(--text-dim);font-size:12px;padding:16px;">載入中...</div>';
+  try {
+    const res  = await fetch(API.base + '/api/v1/vectordb/stats');
+    const data = await res.json();
+    grid.innerHTML = [
+      stat2('Collection',  data.collection),
+      stat2('總 Chunks',   data.total_chunks),
+      stat2('向量維度',    data.dim),
+    ].join('');
+  } catch(e) {
+    grid.innerHTML = `<div style="color:var(--error);font-size:12px;padding:16px;">連線失敗：${e.message}</div>`;
+  }
+}
+
+function stat2(label, value) {
+  return `<div class="stat-card">
+    <div class="stat-card-label">${label}</div>
+    <div class="stat-card-value">${value}</div>
+  </div>`;
+}
+
+async function deleteDoc() {
+  const docId  = document.getElementById('del-doc-id').value.trim();
+  const ver    = document.getElementById('del-version').value.trim();
+  if (!docId) { alert('請輸入 Doc ID'); return; }
+  if (!confirm(`確定刪除 doc_id=${docId}${ver ? ' version='+ver : ' (所有版本)'}？`)) return;
+
+  let url = `${API.base}/api/v1/vectordb/doc/${docId}`;
+  if (ver) url += `?doc_version=${encodeURIComponent(ver)}`;
+
+  const panel = document.getElementById('delete-result');
+  try {
+    const res  = await fetch(url, { method: 'DELETE' });
+    const data = await res.json();
+    panel.className = 'result-panel show success';
+    panel.innerHTML = `<div class="result-header success"><i class="ti ti-circle-check"></i> 刪除完成</div>
+      <div class="result-grid">${stat('刪除數量', data.deleted)}${stat('Doc ID', data.doc_id)}</div>`;
+  } catch(e) {
+    panel.className = 'result-panel show error';
+    panel.innerHTML = `<div class="result-header error"><i class="ti ti-circle-x"></i> 刪除失敗：${e.message}</div>`;
+  }
+}
+
+function saveConfig() {
+  API.base = document.getElementById('api-url').value.trim().replace(/\/$/, '');
+  localStorage.setItem('api_base', API.base);
+  checkHealth();
+}
+
+async function checkHealth() {
+  const oDot  = document.getElementById('ollama-dot');
+  const oTxt  = document.getElementById('ollama-status');
+  const mDot  = document.getElementById('milvus-dot');
+  const mTxt  = document.getElementById('milvus-status');
+
+  try {
+    await fetch(API.base + '/api/v1/health');
+    oDot.className  = 'dot online';
+    oTxt.textContent = 'Backend online';
+  } catch {
+    oDot.className  = 'dot';
+    oTxt.textContent = 'Backend offline';
+  }
+
+  try {
+    await fetch(API.base + '/api/v1/vectordb/stats');
+    mDot.className  = 'dot online';
+    mTxt.textContent = 'Milvus online';
+  } catch {
+    mDot.className  = 'dot';
+    mTxt.textContent = 'Milvus offline';
+  }
+}
+
+function savePrompt() {
+  const val = document.getElementById('config-prompt').value.trim();
+  localStorage.setItem('system_prompt', val);
+  const el = document.getElementById('prompt-saved');
+  el.style.display = 'inline';
+  setTimeout(() => el.style.display = 'none', 2000);
+}
+
+function resetPrompt() {
+  document.getElementById('config-prompt').value = '';
+  localStorage.removeItem('system_prompt');
+  const el = document.getElementById('prompt-saved');
+  el.textContent = '✓ 已還原預設';
+  el.style.display = 'inline';
+  setTimeout(() => { el.style.display = 'none'; el.textContent = '✓ 已儲存'; }, 2000);
+}
+
+function loadPrompt() {
+  const saved = localStorage.getItem('system_prompt') || '';
+  const el = document.getElementById('config-prompt');
+  if (el) el.value = saved;
+}
+
+document.getElementById('api-url').value = API.base;
+loadPrompt();
+checkHealth();
+setInterval(checkHealth, 15000);
+
+// ── Chat ──────────────────────────────────────────────────
+let chatHistory = [];
+let allCitations = [];
+
+function autoResize(el) {
+  el.style.height = 'auto';
+  el.style.height = Math.min(el.scrollHeight, 120) + 'px';
+}
+
+function handleKey(e) {
+  if (e.key === 'Enter' && !e.shiftKey) {
+    e.preventDefault();
+    sendQuery();
+  }
+}
+
+function clearChat() {
+  chatHistory = [];
+  allCitations = [];
+  document.getElementById('chat-messages').innerHTML =
+    `<div class="chat-empty"><i class="ti ti-message-dots"></i>開始提問，AI 將從知識庫中檢索並回答</div>`;
+  const cp = document.getElementById('citation-panel');
+  cp.innerHTML = '點擊引用標籤查看原文';
+}
+
+function appendUserMsg(text) {
+  const box = document.getElementById('chat-messages');
+  // 移除空白提示
+  const empty = box.querySelector('[style*="padding:40px"]');
+  if (empty) empty.remove();
+
+  const el = document.createElement('div');
+  el.className = 'msg';
+  el.innerHTML = `<div class="msg-user">${escHtml(text)}</div>`;
+  box.appendChild(el);
+  box.scrollTop = box.scrollHeight;
+  return el;
+}
+
+function appendTyping() {
+  const box = document.getElementById('chat-messages');
+  const el  = document.createElement('div');
+  el.className = 'msg';
+  el.id = 'typing-msg';
+  el.innerHTML = `<div class="msg-assistant">
+    <div class="msg-bubble">
+      <span class="typing-dot"></span>
+      <span class="typing-dot"></span>
+      <span class="typing-dot"></span>
+    </div>
+  </div>`;
+  box.appendChild(el);
+  box.scrollTop = box.scrollHeight;
+}
+
+function removeTyping() {
+  const el = document.getElementById('typing-msg');
+  if (el) el.remove();
+}
+
+function appendAssistantMsg(answer, citations, msgIdx) {
+  const box = document.getElementById('chat-messages');
+  const el  = document.createElement('div');
+  el.className = 'msg';
+
+  // Citation 標籤
+  let citTags = '';
+  citations.forEach((c, i) => {
+    const globalIdx = allCitations.length + i;
+    const page  = c.page ? `第 ${c.page} 頁` : '';
+    const title = c.title ? c.title.slice(0, 20) : `段落 ${c.chunk_index + 1}`;
+    citTags += `<button class="citation-tag" onclick="showCitation(${globalIdx})">
+      <i class="ti ti-file-text"></i>
+      <span class="citation-badge">${i + 1}</span>
+      ${escHtml(c.source_file)} ${page ? '· ' + page : ''} · ${escHtml(title)}
+    </button>`;
+  });
+
+  el.innerHTML = `<div class="msg-assistant">
+    <div class="msg-bubble">${formatAnswer(answer)}</div>
+    ${citations.length ? `<div class="msg-citations">${citTags}</div>` : ''}
+  </div>`;
+  box.appendChild(el);
+  box.scrollTop = box.scrollHeight;
+
+  // 存入全域 citations
+  citations.forEach(c => allCitations.push(c));
+}
+
+function formatAnswer(text) {
+  return escHtml(text)
+    .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+    .replace(/^### (.+)$/gm, '<strong style="color:var(--accent)">$1</strong>')
+    .replace(/^## (.+)$/gm, '<strong style="font-size:14px">$1</strong>')
+    .replace(/^- (.+)$/gm, '• $1')
+    .replace(/📚 參考來源/g, '<strong style="color:var(--teal)">📚 參考來源</strong>');
+}
+
+function showCitation(idx) {
+  const c = allCitations[idx];
+  if (!c) return;
+  const panel = document.getElementById('citation-panel');
+  const score = c.rerank_score || c.score || 0;
+  panel.innerHTML = `<div style="display:flex; flex-direction:column; gap:10px;">
+    <div style="font-size:11px; font-weight:600; color:var(--accent);">${escHtml(c.source_file)}</div>
+    <div style="font-size:10px; color:var(--text-dim); line-height:1.9;">
+      ${c.page ? '📄 第 ' + c.page + ' 頁<br>' : ''}
+      🏷️ ${c.title ? escHtml(c.title) : '（無標題）'}<br>
+      📊 相似度 ${(c.score * 100).toFixed(1)}%・Rerank ${(score * 10).toFixed(1)}/10
+    </div>
+    <div class="score-bar">
+      <div class="score-track"><div class="score-fill" style="width:${(score * 100).toFixed(0)}%"></div></div>
+      <span style="font-size:10px; color:var(--teal);">${(score * 100).toFixed(0)}%</span>
+    </div>
+    <div style="font-size:11px; color:var(--text-muted); line-height:1.7;
+                background:var(--bg-input); border-radius:var(--radius-sm);
+                padding:10px; max-height:260px; overflow-y:auto;
+                white-space:pre-wrap; word-break:break-word;
+                border-left:2px solid var(--teal);">${escHtml(c.content)}</div>
+  </div>`;
+}
+
+function escHtml(s) {
+  return String(s)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+async function sendQuery() {
+  const input  = document.getElementById('chat-input');
+  const question = input.value.trim();
+  if (!question) return;
+
+  const btn = document.getElementById('btn-send');
+  btn.disabled = true;
+  input.value = '';
+  input.style.height = 'auto';
+
+  const msgIdx = chatHistory.length / 2;
+  appendUserMsg(question);
+  appendTyping();
+
+  const payload = {
+    question            : question,
+    history             : chatHistory,
+    top_k               : parseInt(document.getElementById('q-topk').value)        || 10,
+    similarity_threshold: parseFloat(document.getElementById('q-threshold').value) || 0.0,
+    temperature         : parseFloat(document.getElementById('q-temp').value)       || 0.3,
+    max_tokens          : parseInt(document.getElementById('q-maxtok').value)       || 1500,
+    system_prompt       : localStorage.getItem('system_prompt') || '',
+  };
+
+  try {
+    const res  = await fetch(API.base + '/api/v1/query', {
+      method : 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body   : JSON.stringify(payload),
+    });
+    const data = await res.json();
+    removeTyping();
+
+    if (res.ok) {
+      appendAssistantMsg(data.answer, data.citations || [], msgIdx);
+      chatHistory = data.history || [];
+    } else {
+      appendAssistantMsg('⚠️ 伺服器錯誤：' + (data.detail || JSON.stringify(data)), [], msgIdx);
+    }
+  } catch(e) {
+    removeTyping();
+    appendAssistantMsg('⚠️ 連線失敗：' + e.message, [], msgIdx);
+  }
+
+  btn.disabled = false;
+  input.focus();
+}
+</script>
+</body>
+</html>
