@@ -78,7 +78,7 @@ def _create_collection_with_index(client: MilvusClient, col: str) -> None:
     index_params.add_index(
         field_name  = "vector",
         index_type  = "HNSW",
-        metric_type = "COSINE",
+        metric_type = "IP",
         params      = {"M": 16, "efConstruction": 200},
     )
     client.create_collection(

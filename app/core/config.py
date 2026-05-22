@@ -19,7 +19,7 @@ class Settings(BaseSettings):
 
     # ── Ollama ────────────────────────────────────────
     OLLAMA_BASE_URL    : str = "http://localhost:11434"
-    VISION_MODEL       : str = "gemma3:12b"       # 多模態：圖片/表格理解 + Query LLM
+    VISION_MODEL       : str = "gemma4:26b"       # 多模態：圖片/表格理解 + Query LLM
     EMBEDDING_MODEL    : str = "qwen3-embedding:8b"                  # 向量嵌入（中文優化）
     RERANK_MODEL       : str = "dengcao/Qwen3-Reranker-4B:Q5_K_M"  # 重排序模型
 
@@ -44,7 +44,7 @@ class Settings(BaseSettings):
 
     # ── API ───────────────────────────────────────────
     API_HOST : str = "0.0.0.0"
-    API_PORT : int = 8000
+    API_PORT : int = 8001
 
 
 settings = Settings()
