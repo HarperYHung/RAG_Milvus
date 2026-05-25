@@ -41,12 +41,11 @@ def compute_doc_id(file_bytes: bytes) -> str:
 def make_doc_version(custom: str = "") -> str:
     """
     版號：優先使用呼叫方傳入的自訂字串，
-    否則自動產生 ISO UTC 時間戳，例如 20240516T103045Z
+    否則預設V1
     """
     if custom.strip():
         return custom.strip()
-    return datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-
+    return "V1"
 
 def make_chunk_id(doc_id: str, chunk_index: int) -> str:
     """Milvus primary key 格式：{doc_id}_{chunk_index:04d}"""

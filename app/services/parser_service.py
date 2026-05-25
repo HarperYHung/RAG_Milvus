@@ -139,6 +139,13 @@ def parse_pdf(file_bytes: bytes) -> list[ParsedPage]:
             raw = re.sub(r"[^\n]*第\s*\d+\s*頁[^\n]*\n?", "", raw)
             raw = raw.strip()
 
+            # 文字為空 → 改用 Vision 解析（掃描版 PDF）
+            if not raw:
+                logger.debug("第 %d 頁文字為空，改用 Vision 解析", page_num)
+                pix       = fitz_page.get_pixmap(matrix=fitz.Matrix(2, 2), colorspace=fitz.csRGB)
+                img_bytes = pix.tobytes("png")
+                raw       = describe_image(img_bytes, context="請完整描述這一頁的所有文字內容，不要遺漏任何文字。")
+
             # 表格
             tables   = plumber_page.extract_tables() or []
             tbl_mds  = [m for m in (_table_to_md(t) for t in tables) if m]

@@ -24,10 +24,12 @@ logger = get_logger(__name__)
 
 # 支援 Markdown 標題、中文章節標題
 _HEADER_PATTERNS = [
-    re.compile(r"^#{1,6}\s+.+"),                         # # ## ### ...
-    re.compile(r"^第[一二三四五六七八九十百千\d]+[章節]\s*.+"),  # 第X章 / 第X節
-    re.compile(r"^[一二三四五六七八九十]+[、.．]\s*.+"),         # 一、二、
-    re.compile(r"^\d+\.\s+.+"),                           # 1. 2. 3.
+    re.compile(r"^#{1,6}\s+.+"),
+    re.compile(r"^第[一二三四五六七八九十百千\d]+[章節]\s*.+"),
+    re.compile(r"^[一二三四五六七八九十]+[、.．]\s*.+"),
+    re.compile(r"^\d+\.\s+.+"),
+    re.compile(r"^\*\*.+\*\*$"),           # **標題**
+    re.compile(r"^\d+\.\s+\*\*.+\*\*"),    # 3. **標題**
 ]
 
 def _is_header(line: str) -> bool:

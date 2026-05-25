@@ -42,10 +42,19 @@ _client: MilvusClient | None = None
 
 def get_client() -> MilvusClient:
     global _client
+    uri = f"http://{settings.MILVUS_HOST}:{settings.MILVUS_PORT}"
+
+    if _client is not None:
+        try:
+            _client.list_collections()
+        except Exception:
+            logger.warning("Milvus 連線已斷，重新建立...")
+            _client = None
+
     if _client is None:
-        uri = f"http://{settings.MILVUS_HOST}:{settings.MILVUS_PORT}"
         _client = MilvusClient(uri=uri)
         logger.info("Milvus 連線：%s", uri)
+
     return _client
 
 
@@ -116,10 +125,10 @@ def ensure_collection() -> None:
 def upsert(embedded_chunks: List[EmbeddedChunk]) -> UpsertResult:
     """
     Upsert 邏輯：
-      - chunk_id 為 PK，相同 chunk_id 寫入時 Milvus 自動覆蓋（upsert）
-      - 同一 doc_id 不同 doc_version → chunk_id 不同（因為 doc_id 不同）
-        → 多版本可共存，查詢時可依 doc_version filter
-      - 同一檔案重新上傳但內容相同 → doc_id 相同 → chunk_id 相同 → 自動覆蓋
+      - 寫入前先依 source_file + doc_version 刪除舊資料
+      - 相同檔名 + 相同版號 → 覆蓋
+      - 相同檔名 + 不同版號 → 多版本共存
+      - 全新檔案 → 直接新增
     """
     if not embedded_chunks:
         return UpsertResult(doc_id="", doc_version="",
@@ -129,7 +138,6 @@ def upsert(embedded_chunks: List[EmbeddedChunk]) -> UpsertResult:
     client  = get_client()
     col     = settings.MILVUS_COLLECTION
 
-    # 組成 Milvus 期望的行格式
     rows = []
     for ec in embedded_chunks:
         m = ec.chunk.meta
@@ -143,15 +151,27 @@ def upsert(embedded_chunks: List[EmbeddedChunk]) -> UpsertResult:
             "chunk_index": m.chunk_index,
             "title"      : m.title,
             "strategy"   : m.chunk_strategy.value,
-            "content"    : ec.chunk.content[:65530],  # Milvus VARCHAR 上限
+            "content"    : ec.chunk.content[:65530],
             "vector"     : ec.vector,
         })
 
     doc_id      = embedded_chunks[0].chunk.meta.doc_id
     doc_version = embedded_chunks[0].chunk.meta.doc_version
+    source_file = embedded_chunks[0].chunk.meta.source_file
+
+    # 先刪除相同檔名 + 相同版號的舊資料
+    try:
+        expr    = f'source_file == "{source_file}" and doc_version == "{doc_version}"'
+        deleted = client.delete(collection_name=col, filter=expr)
+        count   = deleted.get("delete_count", 0)
+        if count:
+            logger.info("刪除舊資料：source_file=%s  version=%s  count=%d",
+                        source_file, doc_version, count)
+    except Exception as e:
+        logger.warning("刪除舊資料失敗（略過）：%s", e)
 
     try:
-        result = client.upsert(collection_name=col, data=rows)
+        result   = client.upsert(collection_name=col, data=rows)
         upserted = result.get("upsert_count", len(rows))
         logger.info("Upsert 完成：doc_id=%s  version=%s  count=%d",
                     doc_id, doc_version, upserted)
