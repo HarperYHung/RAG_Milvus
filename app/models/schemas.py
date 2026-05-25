@@ -11,8 +11,8 @@ from pydantic import BaseModel, Field
 # ── 列舉 ──────────────────────────────────────────────────
 
 class ChunkStrategy(str, Enum):
-    HEADER = "header"     # 依標題切割
-    SIZE   = "size"       # 依字數切割
+    HEADER = "header"
+    SIZE   = "size"
 
 
 class FileType(str, Enum):
@@ -20,7 +20,17 @@ class FileType(str, Enum):
     TXT   = "txt"
     DOCX  = "docx"
     XLSX  = "xlsx"
-    IMAGE = "image"       # jpg / png / webp
+    PPTX  = "pptx"
+    IMAGE = "image"
+
+
+class ContentType(str, Enum):
+    """ParsedPage 內容類型（借鑑 RAG-Anything content_list type 欄位）"""
+    TEXT     = "text"      # 純文字段落
+    TABLE    = "table"     # 表格
+    IMAGE    = "image"     # 圖片描述
+    EQUATION = "equation"  # 數學公式（MinerU 萃取）
+    MIXED    = "mixed"     # 混合（預設）
 
 
 class IngestStatus(str, Enum):
@@ -33,21 +43,21 @@ class IngestStatus(str, Enum):
 # ── Chunk ─────────────────────────────────────────────────
 
 class ChunkMeta(BaseModel):
-    """每個 Chunk 隨行的 metadata，存入 Milvus 供篩選與溯源"""
-    doc_id      : str             # 文件唯一碼（SHA-256 前 16 碼）
-    doc_version : str             # 文件版號（上傳時間戳）
-    source_file : str             # 原始檔名
-    file_type   : FileType
-    page        : int   = 0       # 來源頁碼（0 = 不適用）
-    chunk_index : int   = 0       # 文件內第幾個 chunk（0-based）
-    title       : str   = ""      # 所屬標題（header 切法才有）
-    chunk_strategy: ChunkStrategy = ChunkStrategy.SIZE
-    extra       : dict[str, Any] = Field(default_factory=dict)
+    doc_id         : str
+    doc_version    : str
+    source_file    : str
+    file_type      : FileType
+    page           : int          = 0
+    chunk_index    : int          = 0
+    title          : str          = ""
+    chunk_strategy : ChunkStrategy = ChunkStrategy.SIZE
+    # 新增：內容類型，供查詢層做模態過濾
+    content_type   : ContentType  = ContentType.MIXED
+    extra          : dict[str, Any] = Field(default_factory=dict)
 
 
 class Chunk(BaseModel):
-    """單一文字區塊，含內容與 metadata"""
-    chunk_id    : str             # "{doc_id}_{chunk_index:04d}"
+    chunk_id    : str
     content     : str
     token_count : int = 0
     meta        : ChunkMeta
@@ -56,18 +66,17 @@ class Chunk(BaseModel):
 # ── Embedding ─────────────────────────────────────────────
 
 class EmbeddedChunk(BaseModel):
-    """Chunk + 向量，準備寫入 Milvus"""
-    chunk       : Chunk
-    vector      : list[float]
+    chunk  : Chunk
+    vector : list[float]
 
 
 # ── Ingest 請求 / 回應 ────────────────────────────────────
 
 class IngestRequest(BaseModel):
     chunk_strategy : ChunkStrategy = ChunkStrategy.SIZE
-    chunk_size     : int           = 512   # size 切法：每塊最大 token 數
-    chunk_overlap  : int           = 50    # size 切法：重疊 token 數
-    doc_version    : str           = ""    # 留空則自動填入 ISO 時間戳
+    chunk_size     : int           = 512
+    chunk_overlap  : int           = 50
+    doc_version    : str           = ""
 
 
 class IngestResponse(BaseModel):
@@ -92,33 +101,35 @@ class UpsertResult(BaseModel):
 # ── Query 請求 / 回應 ─────────────────────────────────────
 
 class CitationOut(BaseModel):
-    """API 回傳的 Citation 結構"""
-    chunk_id    : str
-    source_file : str
-    page        : int
-    chunk_index : int
-    title       : str
-    content     : str        # 原文節錄（前 300 字）
-    score       : float      # 向量相似度
-    rerank_score: float = 0.0
+    chunk_id     : str
+    source_file  : str
+    page         : int
+    chunk_index  : int
+    title        : str
+    content      : str
+    score        : float
+    rerank_score : float       = 0.0
+    content_type : ContentType = ContentType.MIXED
 
 
 class QueryRequest(BaseModel):
-    question            : str
-    history             : list[dict] = []     # 對話歷史（OpenAI 格式）
-    top_k               : int        = 10     # 初步檢索數量
-    top_n               : int        = 3      # Rerank 後保留數量
-    similarity_threshold: float      = 0.0   # 相似度門檻（低於此值的 chunk 捨棄）
-    use_rerank          : bool       = False  # 是否啟用 Reranking（預設關閉）
-    temperature         : float      = 0.3   # LLM 生成溫度
-    max_tokens          : int        = 1500  # LLM 最大輸出 token 數
-    system_prompt       : str        = ""    # 自訂系統提示詞（空白用預設）
-    doc_id              : str | None = None  # 限定文件 ID（選填）
-    doc_version         : str | None = None  # 限定版號（選填）
+    question             : str
+    history              : list[dict] = []
+    top_k                : int        = 10
+    top_n                : int        = 3
+    similarity_threshold : float      = 0.0
+    use_rerank           : bool       = False
+    temperature          : float      = 0.3
+    max_tokens           : int        = 1500
+    system_prompt        : str        = ""
+    doc_id               : str | None = None
+    doc_version          : str | None = None
+    # 新增：可限定只檢索特定模態（None = 全部）
+    content_type         : ContentType | None = None
 
 
 class QueryResponse(BaseModel):
-    question : str
-    answer   : str
-    citations: list[CitationOut] = []
-    history  : list[dict]        = []     # 更新後的對話歷史（供下一輪傳入）
+    question  : str
+    answer    : str
+    citations : list[CitationOut] = []
+    history   : list[dict]        = []
