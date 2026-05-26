@@ -1,6 +1,6 @@
 """
 embedding_test.py — 產生向量供 Attu Vector Search 使用
-執行方式：python -m app.embedding_test
+執行方式：ppython -m app.test_embedding
 """
 import requests
 from app.core.config import settings
@@ -9,7 +9,7 @@ def get_embedding(text: str) -> list[float]:
     resp = requests.post(
         f"{settings.OLLAMA_BASE_URL}/api/embed",
         json={
-            "model": settings.EMBED_MODEL,
+            "model": settings.EMBEDDING_MODEL,
             "input": text,
         },
         timeout=30,
